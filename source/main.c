@@ -6,42 +6,22 @@
 #include <gba_input.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "graphics.h"
 
-#define MEM_VRAM        0x06000000
-#define SCREEN_WIDTH    240
-#define SCREEN_HEIGHT   160
-typedef u16             M3LINE[SCREEN_WIDTH];
-#define m3_mem          ((M3LINE*)MEM_VRAM)
-
-struct Rect {
-	int x;
-	int y;
-	int width;
-	int height;
-	int hSpeed;
-	int vSpeed;
-	int xPrev;
-	int yPrev;
-};
-
-void drawPixel(int x, int y, int color) {
-	m3_mem[y][x] = color;
+void bounceFromPlayer(struct Rect *player, struct Rect *ball) {
+	int yHit = (ball->y + (ball->height/2)) - (player->y + (player->height/2));
+	ball->vSpeed = ((yHit > 0) - (yHit < 0)) + ((yHit > 3) - (yHit < -3)) + ((yHit > 6) - (yHit < -6));
+	ball->hSpeed = ((ball->hSpeed < 0) - (ball->hSpeed > 0)) * (1 + (1 - ((yHit > 4) || (yHit < -4))));
 }
 
-void drawRect(struct Rect* cRect) {
-	for (int i = cRect->x; i< cRect->x + cRect->width; i++) {
-		for( int j = cRect->y; j < cRect->y + cRect->height; j++) {
-			drawPixel(i, j, 0x7FFF);
-		}
-	}
-}
-
-void clearPrevious(struct Rect* cRect) {
-	for (int i = cRect->xPrev; i< cRect->xPrev + cRect->width; i++) {
-		for( int j = cRect->yPrev; j < cRect->yPrev + cRect->height; j++) {
-			drawPixel(i, j, 0x0000);
-		}
-	}
+bool collision(
+    int x1, int y1, int width1, int height1,
+    int x2, int y2, int width2, int height2) {
+    if (x1 + width1 > x2 &&
+        x1 < x2 + width2 &&
+        y1 + height1 > y2 &&
+        y1 < y2 + height2) return true;
+    return false;
 }
 
 int main(void) {
@@ -78,21 +58,16 @@ int main(void) {
 	ball.width = 8;
 	ball.x = SCREEN_WIDTH/2 - ball.width/2;
 	ball.y = SCREEN_HEIGHT / 2;
-	ball.hSpeed = 0;
+	ball.hSpeed = 1;
 	ball.vSpeed = 0;
 	ball.yPrev = 0;
 	ball.xPrev = 0;
-	
-	// Center line
-	for(int j=0; j<SCREEN_HEIGHT; j++) {
-		drawPixel(SCREEN_WIDTH/2, j, 0x7FFF);
-	}
 	
 	// Render loop
 	while (1) {
 		VBlankIntrWait();
 
-		// Input
+		// Player One movement
 		scanKeys();
 		int pressedKeys = keysDown();
 		int releasedKeys = keysUp();
@@ -111,10 +86,68 @@ int main(void) {
 		if ((releasedKeys & KEY_UP) || (releasedKeys & KEY_DOWN)) {
 			playerOne.vSpeed = 0;
 		}
+
+		// Computer player movement
+		if (ball.x > (SCREEN_WIDTH / 2)) {
+			if ((ball.y + ball.height / 2) < playerTwo.y) {
+				playerTwo.vSpeed = -2;
+			}
+			if ((ball.y + ball.height / 2) > (playerTwo.y + playerTwo.height)) {
+				playerTwo.vSpeed = 2;
+			}
+		} else {
+			// Return to the center of the screen
+			if ((playerTwo.y + playerTwo.width / 2) > SCREEN_HEIGHT / 2) {
+				playerTwo.vSpeed = -2;
+			} else {
+				playerTwo.vSpeed = 2;
+			}
+		}
+		playerTwo.y += playerTwo.vSpeed;
 		
+
+		// Ball movement
+		ball.y += ball.vSpeed;
+		ball.x += ball.hSpeed;
+		// Wall collisions
+		if (ball.y <= 0 && ball.vSpeed < 0) {
+			ball.vSpeed *= -1;
+		} else if ((ball.y + ball.height) >= SCREEN_HEIGHT && ball.vSpeed > 0) {
+			ball.vSpeed *= -1;
+		}
+		// Player collisions
+		if (collision(playerOne.x, playerOne.y, playerOne.width, playerOne.height, ball.x, ball.y, ball.width, ball.height) && ball.hSpeed < 0) {
+			bounceFromPlayer(&playerOne, &ball);
+		}
+		if (collision(playerTwo.x, playerTwo.y, playerTwo.width, playerTwo.height, ball.x, ball.y, ball.width, ball.height) && ball.hSpeed > 0) {
+			bounceFromPlayer(&playerTwo, &ball);
+		}
+		// Scores
+		if (ball.x > SCREEN_WIDTH) {
+			// PlayerOne scored
+			ball.x = SCREEN_WIDTH/2 - ball.width/2;
+			ball.y = SCREEN_HEIGHT / 2;
+			ball.hSpeed = -1;
+			ball.vSpeed = 0;
+		}
+
+		if ((ball.x + ball.width) < 0) {
+			// PlayerTwo scored
+			ball.x = SCREEN_WIDTH/2 - ball.width/2;
+			ball.y = SCREEN_HEIGHT / 2;
+			ball.hSpeed = 1;
+			ball.vSpeed = 0;
+		}
+
+		// Graphics
 		clearPrevious(&playerOne);
 		clearPrevious(&playerTwo);
 		clearPrevious(&ball);
+
+		// Draw Center line
+		for(int j=0; j<SCREEN_HEIGHT; j++) {
+			drawPixel(SCREEN_WIDTH/2, j, 0x7FFF);
+		}
 
 		drawRect(&playerOne);
 		drawRect(&playerTwo);
@@ -122,6 +155,10 @@ int main(void) {
 
 		playerOne.yPrev = playerOne.y;
 		playerOne.xPrev = playerOne.x;
+		playerTwo.yPrev = playerTwo.y;
+		playerTwo.xPrev = playerTwo.x;
+		ball.yPrev = ball.y;
+		ball.xPrev = ball.x;
 	}
 }
 
